@@ -105,7 +105,8 @@ paused = [r["name"] for r in cfg.get("recipients", []) if r.get("pause_until")
 c2.metric("Paus", ", ".join(paused) if paused else "ei")
 if c3.button("🔄 Kontrolli kohe", width="stretch"):
     store().dispatch(manual=True)
-    st.success("Käivitatud. Tulemus tuleb telefoni ~1–2 minuti pärast.")
+    st.success("Käivitatud. Tulemus on ~1 minuti pärast vahelehel „Tervis“ (vajuta „Värskenda andmeid“). "
+               "Telefoni tuleb teade ainult siis, kui midagi muutus.")
 if c4.button("🔔 Testteade", width="stretch"):
     store().dispatch(manual=False, test_notify=True)
     st.success("Testteade teele saadetud.")
@@ -246,6 +247,8 @@ with tab_settings:
                 a1, a2 = st.columns(2)
                 horizon = a1.slider("Mitu päeva ette", 7, 365, int(r.get("max_days_ahead") or 120), step=7)
                 min_seats = a2.number_input("Vähemalt kohti", 1, 10, int(r.get("min_seats") or 1))
+                is_sys = st.toggle("Süsteemiteated (allikate tõrked + nädalaülevaade esmaspäeval kell 9)",
+                                   value=bool(r.get("system", i == 0)), key=f"sys_{i}")
                 st.markdown("**Teavituse tüübid**")
                 n = r.get("notify") or {}
                 new_notify = {k: st.checkbox(lbl, value=n.get(k, True), key=f"n_{k}_{i}")
@@ -262,7 +265,7 @@ with tab_settings:
                         notify=new_notify,
                         watch=[x.strip() for x in watch.splitlines() if x.strip()],
                         ignore=[x.strip() for x in ignore.splitlines() if x.strip()],
-                        topic=topic.strip())
+                        topic=topic.strip(), system=bool(is_sys))
                     save_config(cfg, f"{r['name']}: seaded")
             st.caption(f"Telefonis: ntfy äpp → + → teema nimi. Veebis: https://ntfy.sh/{r.get('topic', '')}")
 
@@ -273,7 +276,7 @@ with tab_settings:
             if st.form_submit_button("Lisa") and nm and tp:
                 recipients.append({"name": nm, "topic": tp, "theatres": [], "quiet_hours": "22:00-08:00",
                                    "pause_until": None, "weekdays": [], "max_days_ahead": 120,
-                                   "min_seats": 1, "notify": {k: True for k in NOTIFY_LABELS},
+                                   "min_seats": 1, "notify": {k: True for k in NOTIFY_LABELS}, "system": False,
                                    "watch": [], "ignore": []})
                 save_config(cfg, f"lisatud saaja {nm}")
                 st.rerun()
