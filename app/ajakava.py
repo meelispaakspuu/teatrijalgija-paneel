@@ -13,6 +13,7 @@ START = "    # AJAKAVA-ALGUS (muudab juhtpaneel, ära muuda käsitsi markereid)"
 END = "    # AJAKAVA-LÕPP"
 INTERVALS = [15, 20, 30, 60, 120, 180]
 FREE_MINUTES = 2000  # privaatse repo Free plaan, min/kuus
+LATEST_HOUR = 23     # päevane kontroll lõpeb enne seda tundi (viimane kontroll ≤ 23:00)
 
 
 def _utc_offset_hours(now: datetime | None = None) -> int:
@@ -29,11 +30,19 @@ def day_hours_local(start_h: int, end_h: int) -> list[int]:
     return list(range(start_h, 24)) + list(range(0, end_h))
 
 
+def last_check_local(interval_min: int, start_h: int, end_h: int) -> str:
+    hours = day_hours_local(start_h, min(end_h, LATEST_HOUR))
+    if interval_min >= 60:
+        hours = hours[:: interval_min // 60]
+        return f"{hours[-1]:02d}:07"
+    return f"{hours[-1]:02d}:{7 + (60 // interval_min - 1) * interval_min:02d}"
+
+
 def build_crons(interval_min: int, start_h: int, end_h: int, night_checks: bool,
                 now: datetime | None = None) -> list[str]:
     """Tagastab cron-avaldised (UTC). Minut 7 jne, et vältida täistunni koormust."""
     off = _utc_offset_hours(now)
-    hours = day_hours_local(start_h, end_h)
+    hours = day_hours_local(start_h, min(end_h, LATEST_HOUR) if end_h else LATEST_HOUR)
     if interval_min >= 60:
         step = interval_min // 60
         hours = hours[::step]

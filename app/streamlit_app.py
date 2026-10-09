@@ -167,22 +167,29 @@ with tab_settings:
                    "Ajakava muudetakse GitHubi workflow-failis; muudatus hakkab kehtima mõne minuti jooksul.")
         sset = cfg.setdefault("settings", {})
         sc = sset.get("schedule") or {"interval_min": 30, "start_h": 8, "end_h": 24, "night_checks": True}
-        with st.form("schedule"):
-            iv = st.select_slider("Kontrolli iga", options=sched.INTERVALS, value=int(sc.get("interval_min", 30)),
+        with st.container(border=True):
+            iv = st.select_slider("Kontrolli iga", key="sched_iv", options=sched.INTERVALS, value=int(sc.get("interval_min", 30)),
                                   format_func=lambda m: f"{m} min" if m < 60 else f"{m // 60} h")
             h1, h2 = st.columns(2)
-            sh = h1.number_input("Päevane aeg alates (kell)", 0, 23, int(sc.get("start_h", 8)))
-            eh = h2.number_input("kuni (kell, 24 = südaöö)", 1, 24, int(sc.get("end_h", 24)))
+            sh = h1.number_input("Esimene kontroll (kell)", 0, 22, int(sc.get("start_h", 8)))
+            eh = h2.number_input(f"Viimane kontroll enne (kell, max {sched.LATEST_HOUR})", 1, sched.LATEST_HOUR,
+                                 min(int(sc.get("end_h", sched.LATEST_HOUR)), sched.LATEST_HOUR))
             night = st.checkbox("Öösel lisaks 2 kontrolli (kell 3 ja 6)", value=bool(sc.get("night_checks", True)))
-            crons = sched.build_crons(int(iv), int(sh), int(eh) % 24 if int(eh) == 24 else int(eh), night)
+            crons = sched.build_crons(int(iv), int(sh), int(eh), night)
             mins = sched.monthly_minutes(crons)
             pct = mins / sched.FREE_MINUTES
-            st.markdown(f"**{sched.runs_per_day(crons)} kontrolli päevas** · hinnanguliselt **~{mins} Actionsi minutit "
-                        f"kuus** ({pct:.0%} tasuta limiidist {sched.FREE_MINUTES} min)")
-            if pct > 0.9:
-                st.warning("See on limiidi lähedal või üle selle. Kui jooks võtab üle 1 minuti, kahekordistub kulu. "
+            last = sched.last_check_local(int(iv), int(sh), int(eh))
+            st.markdown(f"**{sched.runs_per_day(crons)} kontrolli päevas**, viimane kell **{last}** · "
+                        f"hinnanguliselt **~{mins} Actionsi minutit kuus** ({pct:.0%} tasuta limiidist "
+                        f"{sched.FREE_MINUTES} min)")
+            too_much = pct > 1.0
+            if too_much:
+                st.error("See ületab tasuta limiidi. Lühenda päevast ajavahemikku, lülita öised kontrollid välja "
+                         "või vali pikem intervall.")
+            elif pct > 0.85:
+                st.warning("Limiidi lähedal: kui mõni jooks võtab üle 1 minuti, arvestatakse 2 minutit. "
                            "Limiidi ületamisel peatab GitHub jooksud kuu lõpuni.")
-            if st.form_submit_button("💾 Salvesta ajakava", type="primary"):
+            if st.button("💾 Salvesta ajakava", type="primary", disabled=too_much, key="save_schedule"):
                 try:
                     wf_path = ".github/workflows/watch.yml"
                     wf_text, wf_sha = store().read(wf_path, branch="main")
