@@ -222,7 +222,8 @@ with tab_settings:
     th_ids = list(theatres)
     recipients = cfg.setdefault("recipients", [])
     for i, r in enumerate(recipients):
-        with st.expander(f"👤 {r['name']}", expanded=(i == 0)):
+        is_open = r["name"] == st.session_state.get("open_rcp") or (i == 0 and "open_rcp" not in st.session_state)
+        with st.expander(f"👤 {r['name']}" + ("  · süsteemiteated" if r.get("system") else ""), expanded=is_open):
             # Paus: üks puudutus telefonist
             st.markdown("**Paus**")
             p1, p2, p3, p4 = st.columns(4)
@@ -276,18 +277,49 @@ with tab_settings:
                         topic=topic.strip(), system=bool(is_sys))
                     save_config(cfg, f"{r['name']}: seaded")
             st.caption(f"Telefonis: ntfy äpp → + → teema nimi. Veebis: https://ntfy.sh/{r.get('topic', '')}")
+            if len(recipients) > 1:
+                d1, d2 = st.columns([3, 1])
+                sure = d1.checkbox(f"Kinnitan, et eemaldan saaja {r['name']}", key=f"delok_{i}")
+                if d2.button("🗑 Eemalda", key=f"del_{i}", disabled=not sure, width="stretch"):
+                    removed = recipients.pop(i)
+                    save_config(cfg, f"eemaldatud saaja {removed['name']}")
+                    st.session_state.pop("open_rcp", None)
+                    st.session_state.pop("added_rcp", None)
+                    st.rerun()
 
+    if st.session_state.get("added_rcp"):
+        nm_, tp_ = st.session_state["added_rcp"]
+        st.success(f"Saaja **{nm_}** lisatud. Tema telefonis: ntfy äpp → **+** → teema nimi "
+                   f"**`{tp_}`** → Subscribe. Filtreid saad muuta tema plokis ülal.")
     with st.expander("➕ Lisa saaja"):
+        import secrets as _secrets
+        if "new_topic" not in st.session_state:
+            st.session_state.new_topic = "teater-" + _secrets.token_urlsafe(16).replace("_", "x").replace("-", "y")
         with st.form("add_rcp"):
             nm = st.text_input("Nimi")
-            tp = st.text_input("ntfy teema (pikk juhuslik nimi)")
-            if st.form_submit_button("Lisa") and nm and tp:
-                recipients.append({"name": nm, "topic": tp, "theatres": [], "quiet_hours": "22:00-08:00",
-                                   "pause_until": None, "weekdays": [], "max_days_ahead": 120,
-                                   "min_seats": 1, "notify": {k: True for k in NOTIFY_LABELS}, "system": False,
-                                   "watch": [], "ignore": []})
-                save_config(cfg, f"lisatud saaja {nm}")
-                st.rerun()
+            new_th = st.multiselect("Teatrid (tühi = kõik)", th_ids, format_func=lambda t: theatres[t].get("name", t))
+            new_wd = st.multiselect("Nädalapäevad (tühi = kõik)", WD_IDX, format_func=WD.get)
+            new_min = st.number_input("Vähemalt kohti", 1, 10, 1)
+            tp = st.text_input("ntfy teema (genereeritud, võid jätta nii)", st.session_state.new_topic)
+            st.caption("Ülejäänud seaded (vaikne aeg, lavastuste filter, teavituse tüübid, paus) saad muuta "
+                       "pärast lisamist saaja plokis.")
+            if st.form_submit_button("Lisa", type="primary"):
+                if not nm.strip():
+                    st.error("Sisesta nimi.")
+                elif any(r["name"] == nm.strip() for r in recipients):
+                    st.error("Sellise nimega saaja on juba olemas.")
+                elif len(tp.strip()) < 16:
+                    st.error("ntfy teema peab olema vähemalt 16 märki (see on ainus kaitse võõraste eest).")
+                else:
+                    recipients.append({"name": nm.strip(), "topic": tp.strip(), "system": False,
+                                       "theatres": new_th, "quiet_hours": "22:00-08:00", "pause_until": None,
+                                       "weekdays": new_wd, "max_days_ahead": 120, "min_seats": int(new_min),
+                                       "notify": {k: True for k in NOTIFY_LABELS}, "watch": [], "ignore": []})
+                    save_config(cfg, f"lisatud saaja {nm.strip()}")
+                    st.session_state.open_rcp = nm.strip()
+                    st.session_state.added_rcp = (nm.strip(), tp.strip())
+                    del st.session_state["new_topic"]
+                    st.rerun()
 
 # ---------------------------------------------------------------- teatrid
 
