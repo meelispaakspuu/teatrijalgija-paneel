@@ -61,8 +61,16 @@ if not check_password():
 
 
 @st.cache_resource
+def _store(token: str, repo: str, code_version: str) -> GitHubStore:
+    return GitHubStore(token, repo)
+
+
 def store() -> GitHubStore:
-    return GitHubStore(st.secrets["GH_TOKEN"], st.secrets["GH_REPO"])
+    # code_version: kui github_store.py muutub, luuakse uus objekt (vana jääks muidu vahemällu)
+    import hashlib
+    import github_store as _gs
+    ver = hashlib.sha1(open(_gs.__file__, "rb").read()).hexdigest()[:12]
+    return _store(st.secrets["GH_TOKEN"], st.secrets["GH_REPO"], ver)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
