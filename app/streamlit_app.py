@@ -116,6 +116,7 @@ with tab_shows:
         st.info("Andmeid veel pole. Vajuta „Kontrolli kohe“ või oota esimest ajastatud jooksu.")
     else:
         df = pd.DataFrame(rows).sort_values("Aeg")
+        df["Kohti"] = pd.array(df["Kohti"], dtype="Int64")  # teadmata kohtade arv -> tühi, mitte "None"
         f1, f2, f3 = st.columns([2, 2, 2])
         th = f1.multiselect("Teater", sorted(df["Teater"].dropna().unique()))
         stt = f2.multiselect("Staatus", list(STATUS_ET.values()))
@@ -128,7 +129,7 @@ with tab_shows:
             df = df[df["Lavastus"].str.contains(q, case=False, na=False)]
         st.caption(f"{len(df)} etendust")
         st.dataframe(df, hide_index=True, width="stretch", column_config={
-            "Aeg": st.column_config.DatetimeColumn(format="dd.MM.YYYY HH:mm"),
+            "Aeg": st.column_config.DatetimeColumn(format="DD.MM.YYYY HH:mm"),  # moment.js: DD = päev, dd = nädalapäev
             "Link": st.column_config.LinkColumn(display_text="ava"),
             "Kohti": st.column_config.NumberColumn(format="%d")})
 
@@ -139,11 +140,13 @@ with tab_log:
     if not log:
         st.info("Teateid pole veel saadetud.")
     else:
-        st.dataframe(pd.DataFrame([{
+        log_df = pd.DataFrame([{
             "Millal": fmt_local(e["time"]), "Kellele": e.get("recipient"),
             "Tüüp": TYPE_ET.get(e["type"], e["type"]), "Teater": e.get("theatre_name"),
             "Lavastus": e.get("title"), "Etendus": fmt_local(e.get("start")),
-            "Kohti": e.get("seats"), "Tulemus": e.get("delivered"), "Link": e.get("url")} for e in log]),
+            "Kohti": e.get("seats"), "Tulemus": e.get("delivered"), "Link": e.get("url")} for e in log])
+        log_df["Kohti"] = pd.array(log_df["Kohti"], dtype="Int64")
+        st.dataframe(log_df,
             hide_index=True, width="stretch",
             column_config={"Link": st.column_config.LinkColumn(display_text="ava")})
 
