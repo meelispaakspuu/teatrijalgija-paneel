@@ -17,12 +17,22 @@ import streamlit as st
 import yaml
 
 from github_store import GitHubStore
+import ajakava as sched
 
 TZ = ZoneInfo("Europe/Tallinn")
 WD = {"mon": "E", "tue": "T", "wed": "K", "thu": "N", "fri": "R", "sat": "L", "sun": "P"}
 WD_IDX = list(WD)
 STATUS_ET = {"on_sale": "müügis", "sold_out": "välja müüdud", "not_started": "müük algamata",
              "paused": "peatatud"}
+TABLE_ROWS = 20
+TABLE_HEIGHT = 38 + 35 * TABLE_ROWS  # päis + 20 rida
+
+
+def seats_text(x) -> str:
+    """Kohtade arv tekstina; teadmata -> tühi (Streamlit näitaks muidu halli "None")."""
+    return "" if x is None or (isinstance(x, float) and x != x) else str(int(x))
+
+
 TYPE_ET = {"new_show": "uus etendus", "sale_scheduled": "müük algab", "sale_started": "müük avanes",
            "returned": "kohad vabanesid"}
 NOTIFY_LABELS = {"new_show": "Uus etendus kohe müügis", "sale_scheduled": "Müük algab hiljem (piletikeskus)",
@@ -116,7 +126,7 @@ with tab_shows:
         st.info("Andmeid veel pole. Vajuta „Kontrolli kohe“ või oota esimest ajastatud jooksu.")
     else:
         df = pd.DataFrame(rows).sort_values("Aeg")
-        df["Kohti"] = pd.array(df["Kohti"], dtype="Int64")  # teadmata kohtade arv -> tühi, mitte "None"
+        df["Kohti"] = df["Kohti"].map(seats_text)
         f1, f2, f3 = st.columns([2, 2, 2])
         th = f1.multiselect("Teater", sorted(df["Teater"].dropna().unique()))
         stt = f2.multiselect("Staatus", list(STATUS_ET.values()))
@@ -128,10 +138,9 @@ with tab_shows:
         if q:
             df = df[df["Lavastus"].str.contains(q, case=False, na=False)]
         st.caption(f"{len(df)} etendust")
-        st.dataframe(df, hide_index=True, width="stretch", column_config={
+        st.dataframe(df, hide_index=True, width="stretch", height=TABLE_HEIGHT, column_config={
             "Aeg": st.column_config.DatetimeColumn(format="DD.MM.YYYY HH:mm"),  # moment.js: DD = päev, dd = nädalapäev
-            "Link": st.column_config.LinkColumn(display_text="ava"),
-            "Kohti": st.column_config.NumberColumn(format="%d")})
+            "Link": st.column_config.LinkColumn(display_text="ava")})
 
 # ---------------------------------------------------------------- teated
 
@@ -145,14 +154,54 @@ with tab_log:
             "Tüüp": TYPE_ET.get(e["type"], e["type"]), "Teater": e.get("theatre_name"),
             "Lavastus": e.get("title"), "Etendus": fmt_local(e.get("start")),
             "Kohti": e.get("seats"), "Tulemus": e.get("delivered"), "Link": e.get("url")} for e in log])
-        log_df["Kohti"] = pd.array(log_df["Kohti"], dtype="Int64")
+        log_df["Kohti"] = log_df["Kohti"].map(seats_text)
         st.dataframe(log_df,
-            hide_index=True, width="stretch",
+            hide_index=True, width="stretch", height=TABLE_HEIGHT,
             column_config={"Link": st.column_config.LinkColumn(display_text="ava")})
 
 # ---------------------------------------------------------------- seaded
 
 with tab_settings:
+    with st.expander("⏱ Kontrollimise sagedus", expanded=False):
+        st.caption("Teated tulevad ainult muudatuste korral. Siin määrad, kui tihti jälgija lehti kontrollib. "
+                   "Ajakava muudetakse GitHubi workflow-failis; muudatus hakkab kehtima mõne minuti jooksul.")
+        sset = cfg.setdefault("settings", {})
+        sc = sset.get("schedule") or {"interval_min": 30, "start_h": 8, "end_h": 24, "night_checks": True}
+        with st.form("schedule"):
+            iv = st.select_slider("Kontrolli iga", options=sched.INTERVALS, value=int(sc.get("interval_min", 30)),
+                                  format_func=lambda m: f"{m} min" if m < 60 else f"{m // 60} h")
+            h1, h2 = st.columns(2)
+            sh = h1.number_input("Päevane aeg alates (kell)", 0, 23, int(sc.get("start_h", 8)))
+            eh = h2.number_input("kuni (kell, 24 = südaöö)", 1, 24, int(sc.get("end_h", 24)))
+            night = st.checkbox("Öösel lisaks 2 kontrolli (kell 3 ja 6)", value=bool(sc.get("night_checks", True)))
+            crons = sched.build_crons(int(iv), int(sh), int(eh) % 24 if int(eh) == 24 else int(eh), night)
+            mins = sched.monthly_minutes(crons)
+            pct = mins / sched.FREE_MINUTES
+            st.markdown(f"**{sched.runs_per_day(crons)} kontrolli päevas** · hinnanguliselt **~{mins} Actionsi minutit "
+                        f"kuus** ({pct:.0%} tasuta limiidist {sched.FREE_MINUTES} min)")
+            if pct > 0.9:
+                st.warning("See on limiidi lähedal või üle selle. Kui jooks võtab üle 1 minuti, kahekordistub kulu. "
+                           "Limiidi ületamisel peatab GitHub jooksud kuu lõpuni.")
+            if st.form_submit_button("💾 Salvesta ajakava", type="primary"):
+                try:
+                    wf_path = ".github/workflows/watch.yml"
+                    wf_text, wf_sha = store().read(wf_path, branch="main")
+                    new_wf = sched.replace_block(wf_text, crons)
+                    if new_wf != wf_text:
+                        store().write(wf_path, new_wf, wf_sha, f"Ajakava: iga {iv} min", branch="main")
+                    sset["schedule"] = {"interval_min": int(iv), "start_h": int(sh), "end_h": int(eh),
+                                        "night_checks": bool(night)}
+                    save_config(cfg, f"ajakava iga {iv} min")
+                except PermissionError as exc:
+                    st.error(str(exc))
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Ajakava salvestamine ebaõnnestus: {exc}")
+        try:
+            wf_now, _ = store().read(".github/workflows/watch.yml", branch="main")
+            st.caption("Praegune ajakava (UTC): " + " · ".join(f"`{c}`" for c in sched.current_crons(wf_now or "")))
+        except Exception:  # noqa: BLE001
+            pass
+
     theatres = cfg.get("theatres") or {}
     th_ids = list(theatres)
     recipients = cfg.setdefault("recipients", [])

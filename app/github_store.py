@@ -18,9 +18,10 @@ class GitHubStore:
                      "X-GitHub-Api-Version": "2022-11-28"},
         )
 
-    def read(self, path: str) -> tuple[str | None, str | None]:
+    def read(self, path: str, branch: str | None = None) -> tuple[str | None, str | None]:
         """Tagastab (sisu, sha). Puuduva faili korral (None, None)."""
-        r = self.client.get(f"/repos/{self.repo}/contents/{path}", params={"ref": self.branch})
+        ref = branch or self.branch
+        r = self.client.get(f"/repos/{self.repo}/contents/{path}", params={"ref": ref})
         if r.status_code == 404:
             return None, None
         r.raise_for_status()
@@ -28,7 +29,7 @@ class GitHubStore:
         if meta.get("content"):
             return base64.b64decode(meta["content"]).decode("utf-8"), meta["sha"]
         # > 1 MB failid: sisu tuleb eraldi raw-päringuga
-        raw = self.client.get(f"/repos/{self.repo}/contents/{path}", params={"ref": self.branch},
+        raw = self.client.get(f"/repos/{self.repo}/contents/{path}", params={"ref": ref},
                               headers={"Accept": "application/vnd.github.raw+json"})
         raw.raise_for_status()
         return raw.text, meta["sha"]
@@ -37,14 +38,18 @@ class GitHubStore:
         text, _ = self.read(path)
         return json.loads(text) if text else {}
 
-    def write(self, path: str, text: str, sha: str | None, message: str) -> str:
-        body = {"message": message, "branch": self.branch,
+    def write(self, path: str, text: str, sha: str | None, message: str, branch: str | None = None) -> str:
+        body = {"message": message, "branch": branch or self.branch,
                 "content": base64.b64encode(text.encode("utf-8")).decode()}
         if sha:
             body["sha"] = sha
         r = self.client.put(f"/repos/{self.repo}/contents/{path}", json=body)
         if r.status_code == 409:
             raise RuntimeError("Faili muudeti vahepeal mujal. Värskenda lehte ja proovi uuesti.")
+        if r.status_code in (403, 404) and path.startswith(".github/workflows/"):
+            raise PermissionError("Tokenil puudub õigus workflow-faili muuta. Lisa fine-grained tokenile "
+                                  "õigus „Workflows: Read and write“ (GitHub → Settings → Developer settings "
+                                  "→ Fine-grained tokens → teatrijalgija-paneel → Edit).")
         r.raise_for_status()
         return r.json()["content"]["sha"]
 

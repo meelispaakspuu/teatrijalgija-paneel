@@ -8,7 +8,7 @@ Streamlit Community Cloud:
 - Repository: `meelispaakspuu/teatrijalgija-paneel`, Branch: `main`, Main file: `app/streamlit_app.py`
 - Secrets:
   ```toml
-  GH_TOKEN = "github_pat_..."          # fine-grained: ainult teatrijalgija, Contents RW + Actions RW
+  GH_TOKEN = "github_pat_..."          # fine-grained: ainult teatrijalgija, Contents + Actions + Workflows RW
   GH_REPO = "meelispaakspuu/teatrijalgija"
   APP_PASSWORD = "..."
   ```
