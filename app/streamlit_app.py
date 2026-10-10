@@ -218,6 +218,36 @@ with tab_settings:
         except Exception:  # noqa: BLE001
             pass
 
+    with st.expander("📊 Olekuteated (süsteemisaajatele)", expanded=False):
+        st.caption("Olekuteade näitab, kas kõik allikad töötavad ja mitu kontrolli on vahepeal tehtud. "
+                   "Sisulised teated (piletid, uued etendused) ja tõrketeated tulevad sellest sõltumata. "
+                   "Vaiksel ajal olekuteateid ei saadeta.")
+        sset = cfg.setdefault("settings", {})
+        cur = dict(sset.get("status_report") or {})
+        cur.setdefault("mode", "weekly")
+        modes = {"run": "Iga kontrolli järel (ainult testimiseks)", "hours": "Iga N tunni järel",
+                 "daily": "Kord päevas", "weekly": "Kord nädalas", "off": "Ei saada"}
+        with st.container(border=True):
+            mode = st.radio("Sagedus", list(modes), index=list(modes).index(cur["mode"]),
+                            format_func=modes.get, key="sr_mode")
+            new = {"mode": mode}
+            if mode == "hours":
+                new["hours"] = st.select_slider("Iga", options=[1, 2, 3, 4, 6, 8, 12],
+                                                value=int(cur.get("hours", 6)), format_func=lambda h: f"{h} h",
+                                                key="sr_hours")
+            if mode in ("daily", "weekly"):
+                c1, c2 = st.columns(2)
+                if mode == "weekly":
+                    new["weekday"] = c1.selectbox("Päev", list(range(7)), index=int(cur.get("weekday", 0)),
+                                                  format_func=lambda d: ["esmaspäev", "teisipäev", "kolmapäev",
+                                                                         "neljapäev", "reede", "laupäev",
+                                                                         "pühapäev"][d], key="sr_wd")
+                new["hour"] = c2.number_input("Alates kell", 0, 23, int(cur.get("hour", 9)), key="sr_hour")
+                st.caption("Saadetakse esimesel kontrollil pärast seda kellaaega.")
+            if st.button("💾 Salvesta olekuteadete sagedus", key="sr_save"):
+                sset["status_report"] = new
+                save_config(cfg, f"olekuteated: {modes[mode].lower()}")
+
     theatres = cfg.get("theatres") or {}
     th_ids = list(theatres)
     recipients = cfg.setdefault("recipients", [])
