@@ -172,51 +172,21 @@ with tab_log:
 
 with tab_settings:
     with st.expander("⏱ Kontrollimise sagedus", expanded=False):
-        st.caption("Teated tulevad ainult muudatuste korral. Siin määrad, kui tihti jälgija lehti kontrollib. "
-                   "Ajakava muudetakse GitHubi workflow-failis; muudatus hakkab kehtima mõne minuti jooksul.")
-        sset = cfg.setdefault("settings", {})
-        sc = sset.get("schedule") or {"interval_min": 30, "start_h": 8, "end_h": 24, "night_checks": True}
-        with st.container(border=True):
-            iv = st.select_slider("Kontrolli iga", key="sched_iv", options=sched.INTERVALS, value=int(sc.get("interval_min", 30)),
-                                  format_func=lambda m: f"{m} min" if m < 60 else f"{m // 60} h")
-            h1, h2 = st.columns(2)
-            sh = h1.number_input("Esimene kontroll (kell)", 0, 22, int(sc.get("start_h", 8)))
-            eh = h2.number_input(f"Viimane kontroll enne (kell, max {sched.LATEST_HOUR})", 1, sched.LATEST_HOUR,
-                                 min(int(sc.get("end_h", sched.LATEST_HOUR)), sched.LATEST_HOUR))
-            night = st.checkbox("Öösel lisaks 2 kontrolli (kell 3 ja 6)", value=bool(sc.get("night_checks", True)))
-            crons = sched.build_crons(int(iv), int(sh), int(eh), night)
-            mins = sched.monthly_minutes(crons)
-            pct = mins / sched.FREE_MINUTES
-            last = sched.last_check_local(int(iv), int(sh), int(eh))
-            st.markdown(f"**{sched.runs_per_day(crons)} kontrolli päevas**, viimane kell **{last}** · "
-                        f"hinnanguliselt **~{mins} Actionsi minutit kuus** ({pct:.0%} tasuta limiidist "
-                        f"{sched.FREE_MINUTES} min)")
-            too_much = pct > 1.0
-            if too_much:
-                st.error("See ületab tasuta limiidi. Lühenda päevast ajavahemikku, lülita öised kontrollid välja "
-                         "või vali pikem intervall.")
-            elif pct > 0.85:
-                st.warning("Limiidi lähedal: kui mõni jooks võtab üle 1 minuti, arvestatakse 2 minutit. "
-                           "Limiidi ületamisel peatab GitHub jooksud kuu lõpuni.")
-            if st.button("💾 Salvesta ajakava", type="primary", disabled=too_much, key="save_schedule"):
-                try:
-                    wf_path = ".github/workflows/watch.yml"
-                    wf_text, wf_sha = store().read(wf_path, branch="main")
-                    new_wf = sched.replace_block(wf_text, crons)
-                    if new_wf != wf_text:
-                        store().write(wf_path, new_wf, wf_sha, f"Ajakava: iga {iv} min", branch="main")
-                    sset["schedule"] = {"interval_min": int(iv), "start_h": int(sh), "end_h": int(eh),
-                                        "night_checks": bool(night)}
-                    save_config(cfg, f"ajakava iga {iv} min")
-                except PermissionError as exc:
-                    st.error(str(exc))
-                except Exception as exc:  # noqa: BLE001
-                    st.error(f"Ajakava salvestamine ebaõnnestus: {exc}")
-        try:
-            wf_now, _ = store().read(".github/workflows/watch.yml", branch="main")
-            st.caption("Praegune ajakava (UTC): " + " · ".join(f"`{c}`" for c in sched.current_crons(wf_now or "")))
-        except Exception:  # noqa: BLE001
-            pass
+        st.markdown("Kontrolle käivitab **cron-job.org** (konto: sinu oma). Sagedust ja kellaaegu muuda seal: "
+                    "[console.cron-job.org](https://console.cron-job.org/jobs). Ajavöönd Europe/Tallinn.")
+        hist = state.get("run_history") or []
+        now_ = datetime.now(TZ)
+        last24 = [h for h in hist if datetime.fromisoformat(h[0]) >= now_ - timedelta(hours=24)]
+        last7 = [h for h in hist if datetime.fromisoformat(h[0]) >= now_ - timedelta(days=7)]
+        auto24 = sum(1 for h in last24 if not h[1])
+        days = max(1.0, min(7.0, (now_ - datetime.fromisoformat(last7[0][0])).total_seconds() / 86400)) if last7 else 1.0
+        est = round(len(last7) / days * 31)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Kontrolle 24 h", len(last24), help="sh käsitsi käivitatud")
+        c2.metric("Neist automaatseid", auto24)
+        c3.metric("~Actionsi min/kuus", est, help=f"Tasuta limiit {sched.FREE_MINUTES} min; 1 kontroll ≈ 1 min")
+        if est > sched.FREE_MINUTES * 0.9:
+            st.warning("Kulu on tasuta limiidi lähedal. Harvenda cron-job.org ajakava.")
 
     with st.expander("📊 Olekuteated (süsteemisaajatele)", expanded=False):
         st.caption("Olekuteade näitab, kas kõik allikad töötavad ja mitu kontrolli on vahepeal tehtud. "
